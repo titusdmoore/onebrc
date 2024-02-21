@@ -1,0 +1,169 @@
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::{self, BufReader};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread::{self, JoinHandle};
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+struct ThreadPool {
+    workers: Vec<Worker>,
+    thread_count: usize,
+    sender: mpsc::Sender<Job>,
+}
+
+impl ThreadPool {
+    pub fn new(thread_count: usize) -> Self {
+        assert!(thread_count > 0);
+
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        let mut workers = Vec::with_capacity(thread_count);
+
+        for id in 0..thread_count {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+
+        ThreadPool {
+            workers,
+            thread_count,
+            sender,
+        }
+    }
+
+    pub fn execute<F>(self: &Self, action: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(action);
+
+        match &self.sender.send(job) {
+            Ok(_) => {}
+            Err(err) => {
+                println!("Error: could not send job to worker. {}", err);
+                panic!();
+            }
+        }
+    }
+}
+
+struct Worker {
+    id: usize,
+    thread: JoinHandle<()>,
+}
+
+impl Worker {
+    pub fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Self {
+        let handle = thread::spawn(move || {
+            let job = receiver.lock().unwrap().recv().unwrap();
+
+            job();
+        });
+
+        Worker { id, thread: handle }
+    }
+}
+
+const EMPTY_JOIN_ARRAY: Option<JoinHandle<()>> = None;
+const THREAD_COUNT: usize = 15;
+
+fn main() -> io::Result<()> {
+    let file = File::open("measurements.txt")?;
+    let mut reader = BufReader::new(file);
+    let mut buf = String::new();
+    // let mut entries: HashMap<String, Vec<f64>> = HashMap::new();
+    // let reader = Arc::new(Mutex::new(BufReader::new(file)));
+    let mut entries: Arc<Mutex<HashMap<String, Vec<f64>>>> = Arc::new(Mutex::new(HashMap::new()));
+    // let mut handles: [Option<JoinHandle<()>>; 15] = [EMPTY_JOIN_ARRAY; 15];
+
+    // for i in 0..15 {
+    //     let reader = Arc::clone(&reader);
+    //     let entries = Arc::clone(&entries);
+    //
+    //     let handle = thread::spawn(move || {
+    //         let mut buf = String::new();
+    //
+    //         while reader.try_lock().unwrap().read_line(&mut buf).unwrap() > 0 {
+    //             let entry: Vec<&str> = buf.trim_end().split(";").collect();
+    //
+    //             let entry_value: f64 = match entry[1].parse() {
+    //                 Ok(num) => num,
+    //                 Err(_) => {
+    //                     println!("Error: {} is not a number", entry[1]);
+    //                     panic!();
+    //                 }
+    //             };
+    //
+    //             entries
+    //                 .lock()
+    //                 .unwrap()
+    //                 .entry(entry[0].to_string())
+    //                 .and_modify(|curr_vec| curr_vec.push(entry_value))
+    //                 .or_insert(vec![entry_value]);
+    //
+    //             buf.clear();
+    //         }
+    //     });
+    //
+    //     handles[i] = Some(handle);
+    // }
+    //
+    // for handle in handles.iter_mut() {
+    //     if let Some(h) = handle.take() {
+    //         h.join().unwrap();
+    //     }
+    // }
+
+    let thread_pool = ThreadPool::new(15);
+
+    thread_pool.execute(|| {
+        println!("Hello from thread pool");
+    });
+
+    // The old version
+    while reader.read_line(&mut buf)? > 0 {
+        // let entries = Arc::clone(&entries);
+        let input = buf.clone();
+
+        thread_pool.execute(move || {
+            println!("{}", &input);
+        });
+
+        // thread_pool.execute(move || {
+        //     let entry: Vec<&str> = input.trim_end().split(";").collect();
+        //
+        //     let entry_value: f64 = match entry[1].parse() {
+        //         Ok(num) => num,
+        //         Err(_) => {
+        //             println!("Error: {} is not a number", entry[1]);
+        //             panic!();
+        //         }
+        //     };
+        //
+        //     entries
+        //         .lock()
+        //         .unwrap()
+        //         .entry(entry[0].to_string())
+        //         .and_modify(|curr_vec| curr_vec.push(entry_value))
+        //         .or_insert(vec![entry_value]);
+        // });
+        //
+        buf.clear();
+    }
+
+    for (key, value) in entries.lock().unwrap().iter() {
+        let sum: f64 = value.iter().sum();
+        let avg: f64 = sum / value.len() as f64;
+        println!("{}: {}", key, avg);
+    }
+
+    // for (key, value) in entries.lock().unwrap().iter() {
+    //     let sum: f64 = value.iter().sum();
+    //     let avg: f64 = sum / value.len() as f64;
+    //     println!("{}: {}", key, avg);
+    // }
+
+    Ok(())
+}
