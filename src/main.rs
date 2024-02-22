@@ -126,7 +126,7 @@ pub fn run_parse() -> io::Result<()> {
 
     for (key, value) in entries.iter() {
         let sum: f64 = value.iter().sum();
-        let avg: f64 = sum / value.len() as f64;
+        let avg: f64 = ((sum / value.len() as f64) * 100.0).round() / 100.0;
         println!("{}: {}", key, avg);
     }
 
@@ -235,7 +235,7 @@ pub fn run_parse_1fnv() -> io::Result<()> {
 
     for (key, value) in entries.iter() {
         let sum: f64 = value.iter().sum();
-        let avg: f64 = sum / value.len() as f64;
+        let avg: f64 = ((sum / value.len() as f64) * 100.0).round() / 100.0;
         println!("{}: {}", key, avg);
     }
 
