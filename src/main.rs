@@ -1,10 +1,10 @@
+use fnv::FnvHashMap;
 use std::cmp::min;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Cursor};
 use std::os::fd::AsRawFd;
 use std::str;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 use std::io::prelude::*;
@@ -18,12 +18,19 @@ const MAP_PRIVATE: i32 = 0x02;
 const PROT_READ: i32 = 0x01;
 const MAP_FAILED: *mut u8 = !0 as *mut u8;
 
-const THREAD_COUNT: usize = 15;
+const THREAD_COUNT: usize = 25;
 
 pub fn main() -> io::Result<()> {
+    run_parse()
+}
+
+pub fn run_parse() -> io::Result<()> {
     let file = File::open("measurements.txt")?;
     let file_size = unsafe { lseek(file.as_raw_fd(), 0, 2) };
-    let entries: Arc<Mutex<HashMap<String, Vec<f64>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut entries: FnvHashMap<_, Vec<f64>> =
+        FnvHashMap::with_capacity_and_hasher(10000, Default::default());
+    let (tx, rx) = mpsc::channel();
+    let sender = Arc::new(Mutex::new(tx));
 
     let mmap_ptr = unsafe {
         mmap(
@@ -54,36 +61,34 @@ pub fn main() -> io::Result<()> {
             (file_size) as usize,
         );
         let thread_mmap_slice = Cursor::new(&mmap_slice[head as usize..end]);
-        let entries = Arc::clone(&entries);
+        let sender = Arc::clone(&sender);
 
         println!("Running thread {} with section {} to {}", i, head, end - 1);
 
         let handle = thread::spawn(move || {
             println!("Thread started: {}", i);
-            for line in thread_mmap_slice.split(b'\n') {
-                if let Ok(line) = line {
-                    let entry: Vec<&str> = str::from_utf8(&line).unwrap().split(";").collect();
+            let mut thread_hashmap: FnvHashMap<_, Vec<f64>> =
+                FnvHashMap::with_capacity_and_hasher(10000, Default::default());
 
-                    let entry_value: f64 = match entry[1].parse() {
-                        Ok(num) => num,
-                        Err(_) => {
-                            println!("Error: {} is not a number", entry[1]);
-                            panic!();
-                        }
-                    };
+            for line in thread_mmap_slice.split(b'\n').flatten() {
+                let entry: Vec<&str> = str::from_utf8(&line).unwrap().split(';').collect();
 
-                    // I am 90% sure that this is causing performance issues because it basically
-                    // forces everything back to single threaded. I should split each thread into
-                    // its own hashmap and then merge them at the end. 10,000 is less that 1
-                    // billion :D
-                    entries
-                        .lock()
-                        .unwrap()
-                        .entry(entry[0].to_string())
-                        .and_modify(|curr_vec| curr_vec.push(entry_value))
-                        .or_insert(vec![entry_value]);
-                }
+                let entry_value: f64 = match entry[1].parse() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Error: {} is not a number", entry[1]);
+                        panic!();
+                    }
+                };
+
+                thread_hashmap
+                    .entry(entry[0].to_string())
+                    .and_modify(|curr_vec| curr_vec.push(entry_value))
+                    .or_insert(vec![entry_value]);
             }
+
+            let sender = sender.lock().unwrap();
+            sender.send(thread_hashmap).unwrap();
             println!("Thread finished: {}", i);
         });
 
@@ -95,20 +100,31 @@ pub fn main() -> io::Result<()> {
         }
     }
 
-    // Test the slice
-    // assert_eq!(b'\n', mmap_slice[find_next_newline(mmap_slice, 0)]);
+    let mut threads_joined = 0;
+    loop {
+        let received = rx.try_recv();
 
-    // assert_eq!("\n".as_bytes(), &mmap_slice[10].to_be_bytes());
+        if let Ok(received) = received {
+            for (key, value) in received.iter() {
+                entries
+                    .entry(key.to_string())
+                    .and_modify(|curr_vec| curr_vec.extend(value.clone()))
+                    .or_insert(value.clone());
+            }
+            threads_joined += 1;
+        }
 
-    // println!("{}", str::from_utf8(&mmap_slice[0..11]).unwrap());
-    // println!("{:?}", mmap_slice.len());
-    //
+        if threads_joined == THREAD_COUNT - 1 {
+            println!("All threads joined");
+            break;
+        }
+    }
 
     for handle in handles {
         handle.join().unwrap();
     }
 
-    for (key, value) in entries.lock().unwrap().iter() {
+    for (key, value) in entries.iter() {
         let sum: f64 = value.iter().sum();
         let avg: f64 = sum / value.len() as f64;
         println!("{}: {}", key, avg);
@@ -118,11 +134,11 @@ pub fn main() -> io::Result<()> {
 }
 
 pub fn find_next_newline(mmap_slice: &[u8], start: usize) -> usize {
-    for i in start..mmap_slice.len() {
-        if mmap_slice[i] == b'\n' {
+    for (i, char) in mmap_slice.iter().enumerate().skip(start) {
+        if *char == b'\n' {
             return i;
         }
     }
 
-    return mmap_slice.len() - 1;
+    mmap_slice.len() - 1
 }
