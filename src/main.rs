@@ -100,9 +100,8 @@ pub fn run_parse() -> io::Result<()> {
         }
     }
 
-    let mut threads_joined = 0;
-    loop {
-        let received = rx.try_recv();
+    for _ in 0..THREAD_COUNT {
+        let received = rx.recv();
 
         if let Ok(received) = received {
             for (key, value) in received.iter() {
@@ -111,12 +110,6 @@ pub fn run_parse() -> io::Result<()> {
                     .and_modify(|curr_vec| curr_vec.extend(value.clone()))
                     .or_insert(value.clone());
             }
-            threads_joined += 1;
-        }
-
-        if threads_joined == THREAD_COUNT - 1 {
-            println!("All threads joined");
-            break;
         }
     }
 
@@ -209,9 +202,8 @@ pub fn run_parse_1fnv() -> io::Result<()> {
         }
     }
 
-    let mut threads_joined = 0;
-    loop {
-        let received = rx.try_recv();
+    for _ in 0..THREAD_COUNT {
+        let received = rx.recv();
 
         if let Ok(received) = received {
             for (key, value) in received.iter() {
@@ -220,12 +212,6 @@ pub fn run_parse_1fnv() -> io::Result<()> {
                     .and_modify(|curr_vec| curr_vec.extend(value.clone()))
                     .or_insert(value.clone());
             }
-            threads_joined += 1;
-        }
-
-        if threads_joined == THREAD_COUNT - 1 {
-            println!("All threads joined");
-            break;
         }
     }
 
