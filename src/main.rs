@@ -71,20 +71,26 @@ pub fn run_parse() -> io::Result<()> {
             let mut thread_hashmap: HashMap<String, Vec<f64>> = HashMap::with_capacity(10000);
 
             for line in thread_mmap_slice.split(b'\n').flatten() {
-                let entry: Vec<&str> = str::from_utf8(&line).unwrap().split(';').collect();
+                // let entry: Vec<&str> = str::from_utf8(&line).unwrap().split(';').collect();
+                let (location, str_temp) =
+                    cheat_split_once(str::from_utf8(&line).unwrap(), b';').unwrap();
 
-                let entry_value: f64 = match entry[1].parse() {
+                let entry_value: f64 = match str_temp.parse() {
                     Ok(num) => num,
                     Err(_) => {
-                        println!("Error: {} is not a number", entry[1]);
+                        println!("Error: {} is not a number", str_temp);
                         panic!();
                     }
                 };
 
                 thread_hashmap
-                    .entry(entry[0].to_string())
+                    .entry(location.to_string())
                     .and_modify(|curr_vec| curr_vec.push(entry_value))
-                    .or_insert(vec![entry_value]);
+                    .or_insert_with(|| {
+                        let mut new_vec = Vec::with_capacity(10000);
+                        new_vec.push(entry_value);
+                        new_vec
+                    });
             }
 
             let sender = sender.lock().unwrap();
@@ -186,7 +192,11 @@ pub fn run_parse_1fnv() -> io::Result<()> {
                 thread_hashmap
                     .entry(entry[0].to_string())
                     .and_modify(|curr_vec| curr_vec.push(entry_value))
-                    .or_insert(vec![entry_value]);
+                    .or_insert_with(|| {
+                        let mut new_vec = Vec::with_capacity(10000);
+                        new_vec.push(entry_value);
+                        new_vec
+                    });
             }
 
             let sender = sender.lock().unwrap();
@@ -236,4 +246,23 @@ pub fn find_next_newline(mmap_slice: &[u8], start: usize) -> usize {
     }
 
     mmap_slice.len() - 1
+}
+
+// This is a bit of a cheat, because we know that the delimiter will always be present, that there
+// will be fewer characters after the delimiter than before, and that the delimiter will be a single
+// character.
+pub fn cheat_split_once(s: &str, delimiter: u8) -> Result<(&str, &str), &str> {
+    let mut position = s.len() - 1;
+
+    loop {
+        if s.as_bytes()[position] == delimiter {
+            return Ok((&s[..position], &s[position + 1..]));
+        }
+
+        position -= 1;
+
+        if position == 0 {
+            return Err("Delimiter not found");
+        }
+    }
 }

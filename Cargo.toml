@@ -2,6 +2,3 @@
 name = "onebrc-implementation"
 version = "0.1.0"
 edition = "2021"
-
-[dependencies]
-fnv = "1.0.7"
