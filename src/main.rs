@@ -105,9 +105,6 @@ pub fn run_parse() -> io::Result<()> {
         }
     }
 
-    // This is where things slow down I think, what if we convert our hashmap to a HashMap<String,
-    // Arc<Mutex<Vec<f64>>>> and then allow for (the hashmap may need an arc as well) where we can
-    // then multithread this process as well?
     for _ in 0..THREAD_COUNT {
         let received = rx.recv();
 
@@ -121,14 +118,23 @@ pub fn run_parse() -> io::Result<()> {
         }
     }
 
-    for handle in handles {
-        handle.join().unwrap();
-    }
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 
     for (key, value) in entries.iter() {
-        let sum: f64 = value.iter().sum();
-        let avg: f64 = ((sum / value.len() as f64) * 100.0).round() / 100.0;
-        println!("{}: {}", key, avg);
+        let mut sum: f64 = 0.0;
+        let mut min: f64 = 0.0;
+        let mut max: f64 = 0.0;
+
+        value.iter().for_each(|x| {
+            sum += x;
+            min = min(min, x as f64);
+            max = max(max, x as f64);
+        });
+
+        let avg: f64 = ((sum / value.len() as f64) * 10.0).round() / 10.0;
+        println!("{}: {}/{}, {}", key, min, max, avg);
     }
 
     Ok(())
