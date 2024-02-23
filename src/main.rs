@@ -124,17 +124,17 @@ pub fn run_parse() -> io::Result<()> {
 
     for (key, value) in entries.iter() {
         let mut sum: f64 = 0.0;
-        let mut min: f64 = 0.0;
-        let mut max: f64 = 0.0;
+        let mut min_val: f64 = 0.0;
+        let mut max_val: f64 = 0.0;
 
         value.iter().for_each(|x| {
             sum += x;
-            min = min(min, x as f64);
-            max = max(max, x as f64);
+            min_val = f64::min(min_val, *x);
+            max_val = f64::max(max_val, *x);
         });
 
         let avg: f64 = ((sum / value.len() as f64) * 10.0).round() / 10.0;
-        println!("{}: {}/{}, {}", key, min, max, avg);
+        println!("{}: {}/{}, {}", key, min_val, max_val, avg);
     }
 
     Ok(())
