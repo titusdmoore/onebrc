@@ -11,6 +11,7 @@ use std::io::prelude::*;
 
 extern "C" {
     fn mmap(addr: *mut u8, length: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> *mut u8;
+    fn munmap(addr: *mut u8, length: usize) -> i32;
     fn lseek(fd: i32, offset: i64, whence: i32) -> i64;
 }
 
@@ -52,7 +53,7 @@ pub fn run_parse() -> io::Result<()> {
         unsafe { std::slice::from_raw_parts(mmap_ptr as *const u8, file_size as usize) };
 
     let chunk_size = file_size / THREAD_COUNT as i64;
-    let mut handles = vec![];
+    let mut handles = Vec::with_capacity(THREAD_COUNT);
 
     let mut head = 0;
     for i in 0..THREAD_COUNT {
@@ -71,8 +72,12 @@ pub fn run_parse() -> io::Result<()> {
 
             for line in thread_mmap_slice.split(b'\n').flatten() {
                 // let entry: Vec<&str> = str::from_utf8(&line).unwrap().split(';').collect();
+                let str = unsafe {
+                    std::str::from_utf8_unchecked(&line)
+                };
+                
                 let (location, str_temp) =
-                    cheat_split_once(str::from_utf8(&line).unwrap(), b';').unwrap();
+                    cheat_split_once(str, b';').unwrap();
 
                 let entry_value: f64 = match str_temp.parse() {
                     Ok(num) => num,
@@ -122,19 +127,24 @@ pub fn run_parse() -> io::Result<()> {
         .into_iter()
         .for_each(|handle| handle.join().unwrap());
 
-    for (key, value) in entries.iter() {
-        let mut sum: f64 = 0.0;
-        let mut min_val: f64 = 0.0;
-        let mut max_val: f64 = 0.0;
+    // Move this to multiple threads
+    // for (key, value) in entries.iter() {
+    //     let mut sum: f64 = 0.0;
+    //     let mut min_val: f64 = 0.0;
+    //     let mut max_val: f64 = 0.0;
+    //
+    //     value.iter().for_each(|x| {
+    //         sum += x;
+    //         min_val = f64::min(min_val, *x);
+    //         max_val = f64::max(max_val, *x);
+    //     });
+    //
+    //     let avg: f64 = ((sum / value.len() as f64) * 10.0).round() / 10.0;
+    //     println!("{}: {}/{}, {}", key, min_val, max_val, avg);
+    // }
 
-        value.iter().for_each(|x| {
-            sum += x;
-            min_val = f64::min(min_val, *x);
-            max_val = f64::max(max_val, *x);
-        });
-
-        let avg: f64 = ((sum / value.len() as f64) * 10.0).round() / 10.0;
-        println!("{}: {}/{}, {}", key, min_val, max_val, avg);
+    unsafe {
+        munmap(mmap_ptr, file_size as usize);
     }
 
     Ok(())
